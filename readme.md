@@ -1,835 +1,733 @@
-# Breast Cancer Classification Using Random Forest
-## Lab Evaluation Script (Detailed Version)
+# Random Forest Feature Importance — Presentation Script
 
 ---
 
-# STRUCTURE
-
-**Member 1:** First Half (Introduction → Algorithm)  
-**Member 2:** Second Half (Training → Results)
-
-**Total Time:** ~15-18 minutes
+# 👤 MEMBER 1 (First Half)
 
 ---
 
-# ═══════════════════════════════════════════════════════════════
-# MEMBER 1 - FIRST HALF
-# ═══════════════════════════════════════════════════════════════
+## OPENING
+
+> "Ma'am, we built a Random Forest Feature Importance program. It answers the question: **which input features actually matter for predictions?**"
+
+> "Our program creates a synthetic dataset with 8 features — 4 real signal features and 4 pure noise features — trains a 200-tree Random Forest, and computes feature importance. The goal: verify that Random Forest correctly ranks signal features high and noise features low."
 
 ---
 
-## **What We Built**
+## DATASET STRUCTURE
 
-"We built a **breast cancer classification model** using the **Random Forest algorithm**. It takes 30 cell measurements as input and predicts whether a tumor is malignant (cancerous) or benign (non-cancerous). Our model achieved **95.61% accuracy** on test data — correctly classifying 109 out of 114 samples."
+> "We have 600 samples with 8 features:"
 
----
+```
+SIGNAL FEATURES (actually affect the target):
+├── Age:          random integers 18-70
+├── Income:       normal distribution, mean=50000, std=15000
+├── Education:    values 1,2,3,4 with probabilities [0.15, 0.35, 0.30, 0.20]
+└── Health_Score: normal distribution, mean=70, std=10
 
-## **Libraries**
-
-```python
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-
-from sklearn.datasets import load_breast_cancer
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, classification_report
+NOISE FEATURES (do NOT affect target — pure random):
+├── Noise_1: standard normal (mean=0, std=1)
+├── Noise_2: random integers 0-100
+├── Noise_3: normal(mean=5, std=2)
+└── Noise_4: uniform 0-100
 ```
 
-### **What each library does:**
+> "**Example of what the data looks like:**"
 
-| Library | What it does | Example in our code |
-|---------|--------------|---------------------|
-| **NumPy** | Handles numerical arrays and computations | Works behind the scenes when sklearn processes data |
-| **Pandas** | Creates DataFrames — table-like structures with rows/columns | `X = pd.DataFrame(data.data, columns=data.feature_names)` — converts raw data into a labeled table |
-| **Matplotlib** | Creates visualizations | `plt.show()` displays our confusion matrix and bar charts |
-| **sklearn.datasets** | Provides built-in datasets | `load_breast_cancer()` loads the 569-sample dataset |
-| **sklearn.model_selection** | Data splitting utilities | `train_test_split()` divides data into training and testing sets |
-| **sklearn.ensemble** | Ensemble learning models | `RandomForestClassifier` — our main algorithm |
-| **sklearn.metrics** | Evaluation tools | `accuracy_score`, `classification_report` measure model performance |
-
-**If we didn't use Pandas:**  
-We'd have raw numpy arrays without column names. Instead of `X['worst area']`, we'd need to remember that column 23 is worst area. Pandas makes data readable and easier to work with.
+```
+   Age    Income  Education  Health_Score  Noise_1  Noise_2  Noise_3  Noise_4  Target
+0   45   52341.23      3         72.5       0.23      45      5.2      67.3      1
+1   28   38000.00      2         68.1      -1.45      12      4.8      23.1      0
+2   62   71234.56      4         75.3       0.89      78      6.1      89.2      1
+3   35   45000.00      1         65.2       0.12      33      3.9      45.6      0
+4   51   58000.00      3         71.0      -0.67      56      5.5      12.8      1
+```
 
 ---
 
-## **Dataset**
+## TARGET VARIABLE CREATION
+
+> "The target (0 or 1) is created using this formula:"
 
 ```python
-data = load_breast_cancer()
-X = pd.DataFrame(data.data, columns=data.feature_names)
-y = data.target
+log_odds = -7.2 + 0.055*age + 0.00004*income + 0.7*education + 0.03*health_score
+probability = 1 / (1 + np.exp(-log_odds))   # Sigmoid
+target = 1 if random() < probability else 0
 ```
 
-### **Line-by-line explanation:**
+> "**Example calculation for row 0 (Age=45, Income=52341, Education=3, Health=72.5):**"
 
-**`data = load_breast_cancer()`**
-- Returns a `Bunch` object (like a dictionary) containing:
-  - `data.data` — 569×30 array of feature values
-  - `data.target` — 569 labels (0=malignant, 1=benign)
-  - `data.feature_names` — names of all 30 features
-  - `data.target_names` — ['malignant', 'benign']
-  - `data.DESCR` — full dataset description
+```
+log_odds = -7.2 + (0.055 × 45) + (0.00004 × 52341) + (0.7 × 3) + (0.03 × 72.5)
+         = -7.2 + 2.475 + 2.09 + 2.1 + 2.175
+         = 1.64
 
-**`X = pd.DataFrame(data.data, columns=data.feature_names)`**
-- Converts the raw numpy array into a Pandas DataFrame
-- `columns=data.feature_names` assigns meaningful column names
-- Result: A table where each row is a sample, each column is a feature
+probability = 1 / (1 + e^(-1.64)) = 1 / (1 + 0.194) = 0.84
 
-**`y = data.target`**
-- The target variable — what we want to predict
-- Array of 569 values: 0s (malignant) and 1s (benign)
-
-### **Dataset specifications:**
-
-| Property | Value | Meaning |
-|----------|-------|---------|
-| Samples | 569 | 569 tumor samples |
-| Features | 30 | 30 measurements per sample |
-| Malignant (0) | 212 | 37% of samples are cancerous |
-| Benign (1) | 357 | 63% of samples are non-cancerous |
-
-### **The 30 features explained:**
-
-There are 10 base features, each measured 3 ways:
-- **Mean** — average value across the cell nucleus
-- **SE (Standard Error)** — variability in the measurement
-- **Worst** — largest (most extreme) value found
-
-**Example: For "radius"**
-- `mean radius` = average distance from center to edge
-- `radius error` = how much the radius varies
-- `worst radius` = the largest radius measurement
-
-**Why "worst" features matter for cancer:**  
-Cancer cells are irregular. The "worst" values capture the most abnormal cell characteristics — often the best indicators of malignancy.
-
-```python
-print("Feature matrix shape:", X.shape)   # (569, 30)
-print("Target vector shape:", y.shape)    # (569,)
-X.head()  # Shows first 5 rows of the DataFrame
+Since 0.84 > random number, target = 1
 ```
 
-**`X.shape` returns `(569, 30)`** meaning 569 rows (samples) and 30 columns (features).
+> "**Why this design?** The coefficients tell us expected importance:
+>
+> - Education (0.7) — should rank #1
+> - Age (0.055) — should rank #2
+> - Health_Score (0.03) — should rank #3-4
+> - Income (0.00004) — small but present
+> - Noise features (0) — should rank last"
 
 ---
 
-## **Train-Test Split**
+## TRAIN-TEST SPLIT
 
 ```python
 X_train, X_test, y_train, y_test = train_test_split(
-    X, y,
-    test_size=0.2,
+    X, y, test_size=0.25, random_state=42, stratify=y
+)
+```
+
+> "**What this produces:**"
+
+```
+Training set: 450 samples (75%)
+Test set:     150 samples (25%)
+
+With stratify=y:
+  Training: Class 0 = 225, Class 1 = 225  (50-50 preserved)
+  Test:     Class 0 = 75,  Class 1 = 75   (50-50 preserved)
+
+Without stratify (bad):
+  Training: Class 0 = 240, Class 1 = 210  (unbalanced!)
+  Test:     Class 0 = 60,  Class 1 = 90   (unbalanced!)
+```
+
+> "**Why random_state=42?** Every run produces identical split. Without it:"
+
+```
+Run 1: Test accuracy = 81%
+Run 2: Test accuracy = 84%
+Run 3: Test accuracy = 79%
+→ Cannot compare results or debug
+```
+
+---
+
+## RANDOM FOREST CONFIGURATION
+
+```python
+rf = RandomForestClassifier(
+    n_estimators=200,
+    max_depth=8,
+    min_samples_split=5,
+    min_samples_leaf=2,
     random_state=42,
-    stratify=y
+    n_jobs=-1
 )
 ```
 
-### **What this function returns:**
-
-| Variable | Content | Size |
-|----------|---------|------|
-| `X_train` | Training features | 455 samples × 30 features |
-| `X_test` | Testing features | 114 samples × 30 features |
-| `y_train` | Training labels | 455 labels |
-| `y_test` | Testing labels | 114 labels |
-
-### **Parameter-by-parameter explanation:**
-
 ---
 
-**`test_size=0.2`**
+## PARAMETER: `n_estimators=200` (Number of Trees)
 
-*What it does:* Reserves 20% of data for testing, 80% for training.
+> "We use 200 trees. Here's what different values produce:"
 
-*In our case:*
-- Training: 455 samples (80%)
-- Testing: 114 samples (20%)
-
-*What if we change it?*
-| Value | Effect |
-|-------|--------|
-| `test_size=0.1` | 90% train, 10% test. More training data but less reliable accuracy estimate |
-| `test_size=0.3` | 70% train, 30% test. More reliable testing but model learns from less data |
-| `test_size=0.5` | 50-50 split. Good testing but may not train well with only half the data |
-
-*Rule of thumb:* 0.2 (20%) is a common choice — enough data to train and enough to test.
-
----
-
-**`random_state=42`**
-
-*What it does:* Sets a seed for the random number generator. Ensures the same split every time we run the code.
-
-*In our case:* Every time we run this code, the exact same 114 samples go to testing and 455 to training.
-
-*What if we change it?*
-| Value | Effect |
-|-------|--------|
-| `random_state=42` | Always same split. Reproducible results. |
-| `random_state=0` | Different fixed split (still reproducible) |
-| `random_state=None` | Different split every run. Results vary each time. |
-
-*Why 42?* Any integer works. 42 is commonly used (reference to "Hitchhiker's Guide to the Galaxy"). The specific number doesn't matter — what matters is using the same number for reproducibility.
-
-*Why reproducibility matters:* If you're tuning parameters, you want the only change to be your parameter — not the data split.
-
----
-
-**`stratify=y`**
-
-*What it does:* Ensures training and testing sets have the same class proportions as the original data.
-
-*In our case:*
-- Original: 37% malignant, 63% benign
-- With stratify: Both train and test sets are ~37% malignant, ~63% benign
-- Without stratify: Could randomly get 50% malignant in one set, 25% in another
-
-*What if we remove it?*
-| Setting | Effect |
-|---------|--------|
-| `stratify=y` | Proportions preserved. Fair evaluation. |
-| No stratify | Random proportions. Might put mostly benign in training, mostly malignant in testing. Could make model seem worse/better than it is. |
-
-*Example problem without stratify:* If training set gets 90% benign samples, model learns "just predict benign" — then fails on test set with different proportions.
-
----
-
-# ═══════════════════════════════════════════════════════════════
-# 🌳 UNDERSTANDING DECISION TREES (IMPORTANT!)
-# ═══════════════════════════════════════════════════════════════
-
-*This is the core concept. Make sure you understand this before moving to Random Forest.*
-
----
-
-## **What is a Decision Tree?**
-
-A decision tree is like a **flowchart of yes/no questions** that leads to an answer.
-
-### **Simple Real-Life Example: Should I take an umbrella?**
+**With n_estimators=5:**
 
 ```
-                 Is it raining?
-                /              \
-              YES               NO
-               |                 |
-         Take umbrella    Is forecast rainy?
-                          /              \
-                        YES               NO
-                         |                 |
-                  Take umbrella    Don't take umbrella
+Feature Importance (Run 1):     Feature Importance (Run 2):     Feature Importance (Run 3):
+1. Education: 0.28              1. Age: 0.31                    1. Education: 0.26
+2. Age: 0.25                    2. Education: 0.24              2. Income: 0.22
+3. Income: 0.18                 3. Noise_2: 0.15  ← WRONG!      3. Age: 0.21
+4. Noise_2: 0.12  ← WRONG!      4. Income: 0.12                 4. Health_Score: 0.14
+
+→ Rankings change every run! Noise features appear important!
 ```
 
-This is a decision tree! You start at the top and follow the path based on answers until you reach a decision.
+**With n_estimators=200 (ours):**
+
+```
+Feature Importance (consistent across runs):
+1. Education:    0.27
+2. Age:          0.23
+3. Income:       0.18
+4. Health_Score: 0.11
+5. Noise_1:      0.06
+6. Noise_2:      0.05
+7. Noise_3:      0.05
+8. Noise_4:      0.05
+
+→ Rankings stable. Signal features always top 4. Noise features always bottom 4.
+```
+
+**With n_estimators=1000:**
+
+```
+Training time: 10 seconds (vs 2 seconds for 200)
+Accuracy improvement: +0.2% only
+Rankings: Identical to 200 trees
+→ Wastes time with no benefit
+```
 
 ---
 
-## **Decision Tree for Cancer Classification (Our Program)**
+## PARAMETER: `max_depth=8`
 
-In our program, a decision tree asks questions about cell measurements:
+> "Controls how many levels deep each tree can grow."
+
+**With max_depth=2:**
 
 ```
-                    Is worst area ≤ 696?
-                   /                      \
-                 YES                       NO
-                  |                         |
-      Is worst concave points ≤ 0.135?    Is worst concave points ≤ 0.091?
-         /                \                  /                    \
-       YES                NO               YES                    NO
-        |                  |                |                      |
-      BENIGN          Is mean texture     BENIGN               MALIGNANT
-                         ≤ 19.5?
-                        /      \
-                      YES       NO
-                       |         |
-                    BENIGN    MALIGNANT
+Example tree structure:
+                    [Root: Education > 2.5?]
+                   /                        \
+        [Age > 40?]                    [Age > 55?]
+        /         \                    /         \
+    [Leaf:0]  [Leaf:1]            [Leaf:1]   [Leaf:1]
+
+Only 4 leaf nodes. Tree cannot use Income or Health_Score at all.
+Result: Income importance = 0.02, Health_Score importance = 0.01
+→ Model too simple, misses real patterns
 ```
 
-### **How to read this:**
+**With max_depth=8 (ours):**
 
-**Example 1:** A tumor sample has:
-- worst area = 500 (≤ 696? YES → go left)
-- worst concave points = 0.08 (≤ 0.135? YES → go left)
-- **Result: BENIGN**
+```
+Tree can ask 8 questions in sequence:
+"Education > 2?" → "Age > 45?" → "Income > 50000?" → "Health > 70?" → ...
 
-**Example 2:** A tumor sample has:
-- worst area = 900 (≤ 696? NO → go right)
-- worst concave points = 0.15 (≤ 0.091? NO → go right)
-- **Result: MALIGNANT**
+All features get used. Output:
+Train Accuracy: 90%
+Test Accuracy:  82%
+```
+
+**With max_depth=None (unlimited):**
+
+```
+Tree grows until every leaf is pure (single class).
+Creates specific rules like:
+  "IF Age=43 AND Income=52341.23 AND Education=3 AND Health=72.5 THEN Class=1"
+
+This memorizes training data!
+
+Output:
+Train Accuracy: 99.8%  ← Almost perfect
+Test Accuracy:  75%    ← DROPS! Overfitting!
+
+Noise features get higher importance (used to memorize specific samples)
+```
 
 ---
 
-## **How the Tree is Built (Training)**
+## PARAMETER: `min_samples_split=5`
 
-When we call `rf_model.fit()`, each tree learns by finding the best questions to ask.
+> "Minimum samples needed to split a node further."
 
-**Step 1: Start with all 455 training samples at the root**
-
-```
-                    [455 samples]
-                 [168 malignant, 287 benign]
-```
-
-**Step 2: Find the best question to split**
-
-The algorithm tries every possible question:
-- "Is mean radius ≤ 10?" 
-- "Is worst area ≤ 500?"
-- "Is worst area ≤ 600?"
-- ... thousands of possibilities
-
-For each question, it calculates how well it separates malignant from benign.
-
-**Step 3: Pick the best split**
-
-Let's say "Is worst area ≤ 696?" is best:
+**With min_samples_split=2 (default):**
 
 ```
-                    Is worst area ≤ 696?
-                   /                      \
-          [280 samples]              [175 samples]
-       [35 malignant, 245 benign]   [133 malignant, 42 benign]
+Node with just 2 samples can be split:
+  Sample 1: Noise_1 = 0.5, Class = 1
+  Sample 2: Noise_1 = -0.3, Class = 0
+
+Tree splits on Noise_1 (pure noise!) and gets perfect separation.
+→ Noise features importance increases by 10-20%
 ```
 
-- Left side: Mostly benign (245 vs 35) — good!
-- Right side: Mostly malignant (133 vs 42) — good!
+**With min_samples_split=5 (ours):**
 
-**Step 4: Repeat for each branch**
+```
+Node needs 5+ samples to split.
+With 5 samples, pattern must be consistent:
+  Samples 1-3: Noise_1 > 0, Classes = 1, 0, 1 (mixed)
+  Samples 4-5: Noise_1 < 0, Classes = 0, 1 (mixed)
 
-Keep splitting until:
-- Leaves are "pure" (all same class), OR
-- A stopping condition is met (like `min_samples_split`)
+No clear pattern → tree won't split on Noise_1
+→ Noise features stay low importance
+```
+
+**With min_samples_split=50:**
+
+```
+Tree stops growing very early.
+Many nodes have <50 samples, so no further splits.
+Health_Score (weak signal) never gets used.
+→ Health_Score importance = 0.02 (should be ~0.11)
+→ Model underfits, misses weak patterns
+```
 
 ---
 
-## **One Tree vs. Many Trees (Random Forest)**
+## PARAMETER: `min_samples_leaf=2`
 
-### **The Problem with One Tree:**
+> "Minimum samples in each final prediction node (leaf)."
 
-A single decision tree:
-- Can memorize the training data (overfitting)
-- Makes mistakes if the training data has noise
-- Different random splits of data → very different trees
-
-### **The Solution: Random Forest = 100 Trees**
-
-Instead of trusting one tree, we build **100 different trees** and let them **vote**.
+**With min_samples_leaf=1 (default):**
 
 ```
-           Sample to classify: [worst area=750, concave points=0.12, ...]
-                                        |
-            ┌──────────────────────────────────────────────────┐
-            |                                                  |
-      ┌─────┴─────┐    ┌─────┴─────┐          ┌─────┴─────┐
-      │   Tree 1  │    │   Tree 2  │   ...    │  Tree 100 │
-      │   Vote:   │    │   Vote:   │          │   Vote:   │
-      │  BENIGN   │    │ MALIGNANT │          │  BENIGN   │
-      └───────────┘    └───────────┘          └───────────┘
-            |                |                       |
-            └────────────────┴───────────────────────┘
-                              |
-                        FINAL VOTE
-                    65 Benign, 35 Malignant
-                              |
-                    PREDICTION: BENIGN
+Leaf can contain single sample:
+  Leaf 1: [Sample with Age=43, Income=52341] → Predicts Class 1
+
+If that sample is an outlier, predictions are wrong for similar samples.
+→ Model memorizes outliers
+→ Noise features used to isolate outliers → higher importance
 ```
 
-### **Why 100 Trees are Better Than 1:**
+**With min_samples_leaf=2 (ours):**
 
-| Aspect | 1 Tree | 100 Trees (Random Forest) |
-|--------|--------|---------------------------|
-| Overfitting | High risk | Low risk (averaging reduces it) |
-| Stability | Sensitive to small data changes | Stable predictions |
-| Accuracy | Lower | Higher |
-| Individual errors | Hurt the result | Averaged out by other trees |
+```
+Every prediction backed by 2+ samples:
+  Leaf 1: [2 samples, both Class 1] → Predicts Class 1 (reliable)
 
-**Analogy:** Asking 1 doctor vs. asking 100 doctors for a diagnosis. If 65 doctors say benign and 35 say malignant, you go with benign.
+Outliers cannot dominate predictions.
+```
 
 ---
 
-## **What Makes Each Tree "Random"?**
+## PARAMETER: `n_jobs=-1`
 
-Two sources of randomness:
+> "Uses all CPU cores for parallel training."
 
-### **1. Bootstrap Sampling (Random Samples)**
+```
+n_jobs=1:  Training time = 8 seconds (1 core)
+n_jobs=2:  Training time = 4 seconds (2 cores)
+n_jobs=4:  Training time = 2 seconds (4 cores)
+n_jobs=-1: Training time = 2 seconds (all available cores)
 
-Each tree gets a different random subset of the 455 training samples.
-
-- Tree 1 might get samples: [1, 3, 3, 5, 7, 8, 8, ...] (with replacement)
-- Tree 2 might get samples: [2, 4, 4, 6, 9, 12, ...] (different subset)
-
-*With replacement* means the same sample can appear multiple times.
-
-### **2. Random Feature Selection (Random Questions)**
-
-At each split, only a random subset of the 30 features is considered.
-
-- Tree 1 at node A: Considers [worst area, mean radius, symmetry, ...] (5-6 random features)
-- Tree 1 at node B: Considers [texture, smoothness, concavity, ...] (different 5-6 features)
-
-**Why randomness helps:**
-- Trees become different from each other
-- No single feature dominates all trees
-- Errors are independent → averaging works better
+Results are IDENTICAL. Only speed changes.
+```
 
 ---
 
-# ═══════════════════════════════════════════════════════════════
-# BACK TO THE CODE
-# ═══════════════════════════════════════════════════════════════
+## PARAMETER: `criterion` (default='gini')
+
+> "We use Gini impurity. Alternative is entropy."
+
+```
+Gini formula:   1 - (p₀² + p₁²)
+Entropy formula: -p₀×log₂(p₀) - p₁×log₂(p₁)
+
+Example node with 60% Class 0, 40% Class 1:
+  Gini = 1 - (0.6² + 0.4²) = 1 - 0.52 = 0.48
+  Entropy = -0.6×log₂(0.6) - 0.4×log₂(0.4) = 0.97
+
+Using entropy:
+  Training: ~10% slower (log calculations)
+  Accuracy: Usually <1% different
+  Feature rankings: Nearly identical
+→ Gini is faster, results same. No reason to change.
+```
 
 ---
 
-## **Random Forest Model**
+## PARAMETER: `max_features` (default='sqrt')
+
+> "Number of features considered at each split."
+
+```
+We have 8 features. sqrt(8) ≈ 2.8 → each split considers 2-3 random features.
+
+With max_features='sqrt' (default):
+  Split 1 in Tree 1: considers [Age, Noise_1, Income] → picks Age
+  Split 1 in Tree 2: considers [Education, Health, Noise_3] → picks Education
+  → Trees become diverse (good!)
+
+With max_features=None (all features):
+  Every split considers all 8 features.
+  Every tree splits on Education first (strongest signal).
+  All 200 trees look almost identical!
+  → Defeats purpose of ensemble
+  → Less robust predictions
+```
+
+---
+
+## PARAMETER: `bootstrap` (default=True)
+
+> "Whether to sample training data with replacement."
+
+```
+With bootstrap=True (default):
+  Tree 1 training set: [sample_1, sample_1, sample_5, sample_23, sample_23, sample_100, ...]
+  Tree 2 training set: [sample_2, sample_7, sample_7, sample_7, sample_45, sample_88, ...]
+
+  Some samples appear multiple times, some not at all.
+  Each tree sees different data → diverse trees!
+
+  Out-of-Bag (OOB) samples: ~37% of samples not selected for each tree
+  → Can estimate accuracy without test set
+
+With bootstrap=False:
+  All trees see identical 450 samples.
+  Only diversity comes from random feature selection.
+  → Less robust ensemble
+```
+
+---
+
+# 👤 MEMBER 2 (Second Half)
+
+---
+
+## TRAINING THE MODEL
 
 ```python
-rf_model = RandomForestClassifier(
-    n_estimators=100,
-    max_depth=None,
-    min_samples_split=2,
-    random_state=42
-)
+rf.fit(X_train, y_train)
 ```
 
-Now you know:
-- **100 trees** will be built (`n_estimators=100`)
-- Each tree asks yes/no questions about features
-- Each tree grows fully until leaves are pure (`max_depth=None`)
-- All trees vote to make the final prediction
+> "This creates 200 decision trees. What happens inside:"
 
-### **Parameter-by-parameter explanation:**
-
----
-
-**`n_estimators=100`**
-
-*What it does:* Number of decision trees in the forest.
-
-*In our case:* 100 trees vote on each prediction.
-
-*What if we change it?*
-| Value | Effect |
-|-------|--------|
-| `n_estimators=10` | Faster training, but less accurate. Fewer trees to vote. |
-| `n_estimators=100` | Good balance of speed and accuracy (our choice) |
-| `n_estimators=500` | Potentially more accurate, but 5× slower to train |
-| `n_estimators=1000` | Diminishing returns — marginally better but much slower |
-
-*Example:* Imagine 10 doctors vs 100 doctors voting. 100 opinions average out better, but 1000 doctors takes too long for small extra benefit.
-
----
-
-**`max_depth=None`**
-
-*What it does:* Maximum depth of each tree. `None` means trees grow until all leaves are pure.
-
-*What is depth?* The number of levels of questions.
 ```
-Level 0 (root):     Is worst area ≤ 696?
-                   /                    \
-Level 1:      Question                Question
-              /      \                /      \
-Level 2:   Question  Answer      Answer    Question
-             ...                              ...
+For each of 200 trees:
+    1. Bootstrap sample: randomly select 450 samples with replacement
+    2. Build tree:
+       - At each node, consider sqrt(8)≈3 random features
+       - Pick feature+threshold that best splits classes
+       - Continue until max_depth=8 or min_samples_leaf=2
+    3. Store the tree
 ```
 
-*In our case:* Trees can be depth 10, 15, 20 — whatever is needed.
+> "**Output after training:**"
 
-*What if we change it?*
-| Value | Effect |
-|-------|--------|
-| `max_depth=None` | Full trees. Maximum learning. |
-| `max_depth=3` | Only 3 levels of questions. Simple trees. Might miss complex patterns. |
-| `max_depth=5` | Moderate depth. |
-| `max_depth=10` | Deeper, but still limited. |
-
-*Visualization note:* In our code, we use `max_depth=3` for visualization because full trees are too complex to display.
+```
+rf.n_estimators = 200  (200 trees stored)
+rf.estimators_[0]      (first tree object)
+rf.estimators_[0].get_depth()  → 8 (first tree depth)
+```
 
 ---
 
-**`min_samples_split=2`**
-
-*What it does:* Minimum samples needed to split a node further.
-
-*In our case:* A node needs at least 2 samples to try another question.
-
-*Example:*
-- Node has 100 samples → Can split
-- Node has 5 samples → Can split
-- Node has 1 sample → Becomes a leaf (no more splitting)
-
-*What if we change it?*
-| Value | Effect |
-|-------|--------|
-| `min_samples_split=2` | Very deep trees. Splits until almost pure. |
-| `min_samples_split=10` | Node needs 10+ samples to split. Shallower trees. |
-| `min_samples_split=50` | Very shallow trees. Only major patterns. |
-
----
-
-**`random_state=42`**
-
-*What it does:* Seed for all randomness (bootstrap sampling, feature selection).
-
-*In our case:* Same 100 trees are built every run.
-
----
-
-*[Handover to Member 2]*
-
-"That covers the setup and what decision trees/forests are. My partner will now explain the training process and results."
-
----
-
-# ═══════════════════════════════════════════════════════════════
-# MEMBER 2 - SECOND HALF
-# ═══════════════════════════════════════════════════════════════
-
----
-
-## **Training the Model**
+## MODEL EVALUATION
 
 ```python
-rf_model.fit(X_train, y_train)
+train_acc = rf.score(X_train, y_train)  # → 0.90
+test_acc = rf.score(X_test, y_test)     # → 0.82
 ```
 
-### **What `fit()` does — Step by Step:**
+> "**What this output means:**"
 
-**Step 1: For each of the 100 trees, create a bootstrap sample**
+```
+Train Accuracy: 90%
+  → Model correctly classifies 405 out of 450 training samples
 
-Tree 1 gets: 455 random samples from training data (with replacement)
-Tree 2 gets: 455 different random samples
-... (100 trees total)
+Test Accuracy: 82%
+  → Model correctly classifies 123 out of 150 test samples
 
-**Step 2: Build each tree**
-
-For each tree, starting at the root:
-1. Take all samples at this node
-2. Randomly select ~5 features (√30 ≈ 5)
-3. Find the best feature and threshold to split on
-4. Split into two child nodes
-5. Repeat for each child until done
-
-**Step 3: Store all trees**
-
-All 100 trees are saved in `rf_model.estimators_` for later predictions.
-
-### **Gini Impurity — How "best" split is chosen:**
-
-At each node, we want to separate malignant from benign as cleanly as possible.
-
-**Formula:** `Gini = 1 - (p₀² + p₁²)`
-
-Where:
-- p₀ = proportion of malignant samples in the node
-- p₁ = proportion of benign samples in the node
-
-**Examples:**
-
-| Node contents | p₀ | p₁ | Gini | Meaning |
-|---------------|----|----|------|---------|
-| 100 malignant, 0 benign | 1.0 | 0.0 | 1 - (1 + 0) = **0** | Pure! All same class. |
-| 0 malignant, 100 benign | 0.0 | 1.0 | 1 - (0 + 1) = **0** | Pure! |
-| 50 malignant, 50 benign | 0.5 | 0.5 | 1 - (0.25 + 0.25) = **0.5** | Maximum impurity (50-50) |
-| 30 malignant, 70 benign | 0.3 | 0.7 | 1 - (0.09 + 0.49) = **0.42** | Somewhat impure |
-
-**Lower Gini = better split**
-
-**Example of choosing a split:**
-
-Node has: 100 samples (40 malignant, 60 benign), Gini = 0.48
-
-Try split: "Is worst area ≤ 500?"
-- Left child: 10 malignant, 55 benign → Gini = 0.27
-- Right child: 30 malignant, 5 benign → Gini = 0.24
-
-Average Gini after split = ~0.26 (much better than 0.48!)
-
-The algorithm picks the split that reduces Gini the most.
-
----
-
-## **Making Predictions**
-
-```python
-y_pred = rf_model.predict(X_test)
+Gap: 8%
+  → Some overfitting, but acceptable
+  → If gap was 25% (like with max_depth=None), that's bad overfitting
 ```
 
-### **What happens for ONE test sample:**
+> "**Classification Report output:**"
 
-Let's say test sample #47 has these values:
-- worst area = 620
-- worst concave points = 0.14
-- mean radius = 15.2
-- ... (30 features total)
-
-**Each tree makes its own prediction:**
-
-**Tree 1:**
-```
-Is worst area ≤ 696? → 620 ≤ 696? YES → Go left
-Is worst concave points ≤ 0.135? → 0.14 ≤ 0.135? NO → Go right
-Is mean texture ≤ 19.5? → 18 ≤ 19.5? YES → Go left
-→ BENIGN
-```
-
-**Tree 2:**
-```
-Is mean radius ≤ 14.5? → 15.2 ≤ 14.5? NO → Go right
-Is worst perimeter ≤ 100? → 95 ≤ 100? YES → Go left
-→ BENIGN
-```
-
-**Tree 3:**
-```
-Is worst concave points ≤ 0.10? → 0.14 ≤ 0.10? NO → Go right
-Is worst area ≤ 800? → 620 ≤ 800? YES → Go left
-→ MALIGNANT
-```
-
-... (97 more trees vote)
-
-**Final tally:**
-- 68 trees say BENIGN
-- 32 trees say MALIGNANT
-- **Majority wins → BENIGN**
-
-This is repeated for all 114 test samples.
-
----
-
-## **Accuracy Score**
-
-```python
-accuracy = accuracy_score(y_test, y_pred)
-print("Model Accuracy:", accuracy)  # Output: 0.9561 (95.61%)
-```
-
-### **What `accuracy_score()` does:**
-
-**Formula:** `Accuracy = Correct Predictions / Total Predictions`
-
-*In our case:*
-- Total test samples: 114
-- Correct predictions: 109
-- Accuracy: 109/114 = **0.9561 = 95.61%**
-
----
-
-## **Classification Report**
-
-```python
-print(classification_report(y_test, y_pred))
-```
-
-**Output:**
 ```
               precision    recall  f1-score   support
-           0       0.95      0.93      0.94        42
-           1       0.96      0.97      0.97        72
-    accuracy                           0.96       114
+           0       0.81      0.84      0.82        75
+           1       0.83      0.80      0.82        75
+    accuracy                           0.82       150
+
+precision = Of all predicted Class 1, what % were actually Class 1
+recall    = Of all actual Class 1, what % did we correctly predict
+f1-score  = Harmonic mean of precision and recall
 ```
 
-### **Each metric with real numbers from our model:**
-
 ---
 
-**Precision** = TP / (TP + FP) — "How accurate are our positive predictions?"
-
-For malignant (class 0):
-- We predicted 41 samples as malignant
-- 39 were actually malignant (TP), 2 were benign (FP)
-- Precision = 39/(39+2) = **0.95 (95%)**
-
----
-
-**Recall** = TP / (TP + FN) — "What % of actual positives did we find?"
-
-For malignant (class 0):
-- There were 42 actual malignant samples
-- We found 39 (TP), missed 3 (FN)
-- Recall = 39/(39+3) = **0.93 (93%)**
-
----
-
-**F1-Score** = 2 × (P × R) / (P + R) — Harmonic mean of precision and recall
-
-For malignant: 2 × (0.95 × 0.93) / (0.95 + 0.93) = **0.94**
-
----
-
-**Support** = Number of actual samples in each class
-- Malignant: 42
-- Benign: 72
-- Total: 114
-
----
-
-## **Confusion Matrix**
+## FEATURE IMPORTANCE — IMPURITY-BASED METHOD
 
 ```python
-from sklearn.metrics import ConfusionMatrixDisplay, confusion_matrix
-
-cm = confusion_matrix(y_test, y_pred)
-disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=data.target_names)
-plt.figure(figsize=(6, 6))
-disp.plot(cmap=plt.cm.Blues)
-plt.title("Confusion Matrix - Random Forest")
-plt.show()
+importances = rf.feature_importances_
 ```
 
-### **Our confusion matrix:**
+> "**How it calculates importance for each feature:**"
 
-|  | **Predicted Malignant** | **Predicted Benign** |
-|--|------------------------|---------------------|
-| **Actual Malignant** | 39 (TP) ✓ | 3 (FN) ✗ |
-| **Actual Benign** | 2 (FP) ✗ | 70 (TN) ✓ |
+```
+For feature "Age":
+    1. Find every node across all 200 trees where Age was used for splitting
+    2. At each node, calculate:
+       weighted_impurity_decrease = (samples_at_node / total_samples) ×
+                                    (impurity_before - impurity_after)
+    3. Sum all decreases for Age
+    4. Divide by sum for all features (normalize to 1.0)
+```
 
-**Reading it:**
-- **39 True Positives:** Cancer → Predicted cancer ✓
-- **70 True Negatives:** No cancer → Predicted no cancer ✓
-- **3 False Negatives:** Cancer → Predicted no cancer ✗ (MISSED!)
-- **2 False Positives:** No cancer → Predicted cancer ✗ (false alarm)
+> "**Example calculation for one node:**"
 
-**Why 3 False Negatives are concerning:**
-In real life, these 3 patients would be told "no cancer" when they actually have cancer. They might not get treatment.
+```
+Node: 100 samples (60 Class 0, 40 Class 1)
+Split on Age > 45:
+  Left child:  50 samples (45 Class 0, 5 Class 1)
+  Right child: 50 samples (15 Class 0, 35 Class 1)
+
+Gini before: 1 - (0.6² + 0.4²) = 0.48
+Gini left:   1 - (0.9² + 0.1²) = 0.18
+Gini right:  1 - (0.3² + 0.7²) = 0.42
+
+Weighted Gini after: (50/100)×0.18 + (50/100)×0.42 = 0.30
+
+Impurity decrease: 0.48 - 0.30 = 0.18 → Added to Age's importance
+```
+
+> "**Our actual output:**"
+
+```
+Feature Importances (Impurity Decrease):
+     Education : 0.2734   ← Highest (as expected from coefficient 0.7)
+           Age : 0.2289   ← Second (coefficient 0.055)
+        Income : 0.1823   ← Third
+  Health_Score : 0.1098   ← Fourth (coefficient 0.03)
+       Noise_1 : 0.0589   ← Bottom 4 — all noise features
+       Noise_2 : 0.0512
+       Noise_3 : 0.0487
+       Noise_4 : 0.0468
+                 -------
+         Total : 1.0000
+```
+
+> "**This validates our model:** Signal features rank top 4, noise features rank bottom 4."
 
 ---
 
-## **Feature Importance**
+## FEATURE IMPORTANCE — PERMUTATION METHOD
 
 ```python
-importances = rf_model.feature_importances_
-
-feature_importance_df = pd.DataFrame({
-    "Feature": X.columns,
-    "Importance": importances
-}).sort_values(by="Importance", ascending=False)
-
-feature_importance_df.head(10)
+perm_result = permutation_importance(rf, X_test, y_test, n_repeats=30, scoring="accuracy")
 ```
 
-### **What this tells us:**
+> "**How it works:**"
 
-Which features are most useful for making predictions.
+```
+For feature "Age":
+    1. Record baseline accuracy: 82%
+    2. Shuffle Age column randomly (break relationship with target)
+    3. Measure new accuracy: 71%
+    4. Importance = 82% - 71% = 11% (0.11)
+    5. Repeat 30 times, take average
 
-**How importance is calculated:**
-1. Every time a feature is used to split a node, the Gini reduction is recorded
-2. Sum across all splits in all 100 trees
-3. Normalize so all values sum to 1.0
+If shuffling a feature drops accuracy a lot → that feature was important
+If shuffling barely changes accuracy → feature wasn't important
+```
 
-### **Our top features:**
+> "**Actual output:**"
 
-| Feature | Importance | Why it matters |
-|---------|------------|----------------|
-| worst area | 14.0% | Largest cell size — cancer cells are bigger |
-| worst concave points | 13.0% | Irregular cell shapes |
-| worst radius | 9.8% | Cell size |
-| mean concave points | 9.1% | Shape irregularity |
-| worst perimeter | 7.2% | Boundary length |
+```
+Permutation Importances:
+     Education : 0.0847  ← Shuffling Education drops accuracy by 8.5%
+           Age : 0.0623  ← Shuffling Age drops accuracy by 6.2%
+        Income : 0.0412
+  Health_Score : 0.0234
+       Noise_1 : 0.0012  ← Shuffling noise barely changes accuracy
+       Noise_2 : 0.0008
+       Noise_3 : 0.0003
+       Noise_4 : 0.0001
+```
 
-**Key insight:** "Worst" features (extreme values) are most predictive because cancer cells have abnormal extremes.
+> "**Why use both methods?**"
+
+```
+Impurity-based:
+  ✓ Fast (calculated during training)
+  ✗ Biased toward features with many unique values
+
+Permutation-based:
+  ✓ Unbiased
+  ✓ Uses test data (realistic)
+  ✗ Slow (needs re-evaluation)
+
+Both agree on rankings → HIGH CONFIDENCE in results
+```
 
 ---
 
-## **Decision Tree Visualization**
+## VISUALIZATION 1: Feature Importance Bar Chart
 
 ```python
-from sklearn.tree import plot_tree
-
-tree = rf_model.estimators_[0]
-
-plt.figure(figsize=(20, 10))
-plot_tree(
-    tree,
-    feature_names=X.columns,
-    class_names=data.target_names,
-    filled=True,
-    rounded=True,
-    max_depth=3
-)
-plt.title("One Decision Tree from Random Forest (Depth = 3)")
-plt.show()
+plt.barh(importances_sorted.index, importances_sorted.values)
+plt.savefig("plot_feature_importance.png")
 ```
 
-### **What `estimators_[0]` means:**
-
-- `estimators_` = list of all 100 trees in our forest
-- `[0]` = first tree (index 0)
-- We visualize just 1 tree because showing 100 would be impractical
-
-### **Reading a node:**
+> "**What the output looks like:**"
 
 ```
-worst perimeter <= 106.1
-gini = 0.468
-samples = 455
-value = [168, 287]
-class = benign
-```
+                    Feature Importance (Mean Impurity Decrease)
+Noise_4        ████ 0.0468
+Noise_3        ████ 0.0487
+Noise_2        █████ 0.0512
+Noise_1        █████ 0.0589
+Health_Score   ██████████ 0.1098
+Income         ████████████████ 0.1823
+Age            ████████████████████ 0.2289
+Education      ██████████████████████ 0.2734  (RED - above median)
+               |-------- median line --------|
 
-- **Line 1:** The question asked at this node
-- **gini:** Impurity (0 = pure, 0.5 = 50-50 split)
-- **samples:** Training samples at this node
-- **value:** [malignant count, benign count]
-- **class:** Current majority prediction
+RED bars = above median importance
+BLUE bars = below median importance
+```
 
 ---
 
-## **Saving Results**
+## VISUALIZATION 2: Impurity vs Permutation Comparison
 
 ```python
-feature_importance_df.to_csv("feature_importance_results.csv", index=False)
+fig, axes = plt.subplots(1, 2)
+# Left: impurity importance
+# Right: permutation importance
+plt.savefig("plot_importance_comparison.png")
 ```
 
-Saves feature importance to a CSV file.
+> "**What it shows:**"
+
+```
+Left Panel (Impurity):          Right Panel (Permutation):
+Education  ███████ 0.27         Education  ████████ 0.085
+Age        ██████ 0.23          Age        ██████ 0.062
+Income     █████ 0.18           Income     ████ 0.041
+Health     ███ 0.11             Health     ██ 0.023
+Noise_1    ██ 0.06              Noise_1    ▏ 0.001
+Noise_2    █ 0.05               Noise_2    ▏ 0.001
+Noise_3    █ 0.05               Noise_3    ▏ 0.000
+Noise_4    █ 0.05               Noise_4    ▏ 0.000
+
+Both methods show same ranking → Results validated!
+```
 
 ---
 
-## **Summary**
+## VISUALIZATION 3: Confusion Matrix
 
-| What | Value |
-|------|-------|
-| Algorithm | Random Forest (100 decision trees voting) |
-| Dataset | 569 samples, 30 features |
-| Training | 455 samples (80%) |
-| Testing | 114 samples (20%) |
-| Accuracy | 95.61% (109/114 correct) |
-| Missed cancers | 3 (False Negatives) |
-| False alarms | 2 (False Positives) |
-| Best predictor | worst area (14%) |
+```python
+cm = confusion_matrix(y_test, rf.predict(X_test))
+sns.heatmap(cm, annot=True)
+plt.savefig("plot_confusion_matrix.png")
+```
+
+> "**Actual output:**"
+
+```
+              Predicted
+              Class 0    Class 1
+Actual  Class 0    63        12
+        Class 1    15        60
+
+Reading the matrix:
+  63 = True Negatives  (correctly predicted 0)
+  60 = True Positives  (correctly predicted 1)
+  12 = False Positives (predicted 1, was actually 0) — Type I error
+  15 = False Negatives (predicted 0, was actually 1) — Type II error
+
+Total correct: 63 + 60 = 123 out of 150 = 82% accuracy
+```
 
 ---
 
-# ═══════════════════════════════════════════════════════════════
-# QUICK Q&A REFERENCE
-# ═══════════════════════════════════════════════════════════════
+## VISUALIZATION 4: Tree Depth Distribution
 
-**"What is a decision tree?"**
-A flowchart of yes/no questions that leads to a prediction. Each question splits the data based on a feature value.
+```python
+depths = [tree.get_depth() for tree in rf.estimators_]
+plt.hist(depths)
+plt.savefig("plot_tree_depths.png")
+```
 
-**"What is Random Forest?"**
-100 decision trees built with random samples and random features. They vote to make predictions.
+> "**What it shows:**"
 
-**"Why use 100 trees instead of 1?"**
-One tree can overfit. 100 trees average out errors and give more stable, accurate predictions.
+```
+Number of Trees
+     50 |          ████████████████████████████████████████
+     40 |          ████████████████████████████████████████
+     30 |  ████    ████████████████████████████████████████
+     20 |  ████    ████████████████████████████████████████
+     10 |  ████████████████████████████████████████████████
+      0 +----+----+----+----+----+----+----+----+----+
+             5    6    7    8
+                 Tree Depth
 
-**"What does fit() do?"**
-Builds all 100 trees by learning the best questions (splits) from training data.
+Most trees reach depth 7-8 (our max_depth=8 limit)
+Mean depth ≈ 7.8 (red dashed line)
+→ Trees are using the full allowed complexity
+```
 
-**"What does predict() do?"**
-Passes a sample through all 100 trees, counts votes, returns the majority class.
+---
 
-**"What is Gini impurity?"**
-Measures how mixed a node is. Gini=0 means pure (all same class). Gini=0.5 means 50-50 split.
+## KEY FUNCTIONS SUMMARY
 
-**"Why are 'worst' features most important?"**
-Cancer cells have abnormal extremes. The "worst" (largest) measurements capture these abnormalities.
+| Function                              | Example        | Output                         |
+| ------------------------------------- | -------------- | ------------------------------ |
+| `np.random.seed(42)`                  | Sets seed      | Same random numbers every run  |
+| `np.random.randint(18, 70, 600)`      | 600 ages       | `[45, 28, 62, 35, ...]`        |
+| `np.random.normal(50000, 15000, 600)` | 600 incomes    | `[52341.23, 38000.0, ...]`     |
+| `train_test_split(..., stratify=y)`   | Split data     | 450 train, 150 test (balanced) |
+| `rf.fit(X_train, y_train)`            | Train          | Creates 200 trees              |
+| `rf.score(X_test, y_test)`            | Accuracy       | `0.82`                         |
+| `rf.feature_importances_`             | Importance     | `[0.27, 0.23, 0.18, ...]`      |
+| `permutation_importance(...)`         | Alt importance | `[0.085, 0.062, ...]`          |
 
-**"What happens if n_estimators=10?"**
-Only 10 trees vote instead of 100. Faster but less accurate.
+---
 
-**"What does random_state do?"**
-Sets a seed so the same random choices are made every run. Makes results reproducible.
+## ADDITIONAL SCENARIOS
+
+---
+
+### If Dataset Had Only 100 Samples:
+
+```
+With n=100:
+  - Only 75 training samples
+  - Noise features might rank in top 4 by random chance
+  - Feature importance unreliable
+  - Need to increase min_samples_split to 10-20
+```
+
+---
+
+### If Classes Were Imbalanced (90-10):
+
+```
+With 90% Class 0, 10% Class 1:
+  - Model might just predict Class 0 always (90% "accuracy")
+  - Must use class_weight='balanced':
+
+    rf = RandomForestClassifier(class_weight='balanced', ...)
+
+  - This weights Class 1 samples 9× higher
+  - Forces model to learn minority class patterns
+```
+
+---
+
+### If Age and Income Were Correlated (r=0.9):
+
+```
+Both features contain similar information.
+Impurity importance splits between them:
+  Age: 0.15 (instead of 0.23)
+  Income: 0.14 (instead of 0.18)
+
+Permutation importance handles this better.
+Always check correlation matrix before modeling:
+  df.corr()
+```
+
+---
+
+### If Data Had Missing Values:
+
+```
+sklearn RandomForest cannot handle NaN.
+
+Options:
+1. df.dropna()                    — Remove rows with missing values
+2. df.fillna(df.median())        — Replace with median
+3. Use HistGradientBoostingClassifier — Handles NaN natively
+```
+
+---
+
+## CLOSING
+
+> "To summarize: We built a 200-tree Random Forest on 600 samples with 8 features. The model achieves 82% test accuracy and correctly identifies Education, Age, Income, and Health_Score as the important features while ranking all four noise features at the bottom."
+
+> "Both impurity-based and permutation-based importance methods agree on the rankings, validating that our Random Forest successfully distinguishes signal from noise."
+
+> "That completes our explanation."
+
+---
+
+_End of Presentation Script_
